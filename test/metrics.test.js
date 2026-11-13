@@ -96,3 +96,26 @@ test('b2b day1: suggestions carry evidence, recorded deadlines and suggested dat
   assert.ok(tasks.some(t => t.task_key === 'follow_up_due:BC-036'));
   assert.equal(tasks.filter(t => t.rule === 'completion_overdue').length, 0, 'no overdue completions on Day 1');
 });
+
+test('service order value in period is calculated from the service sales only', () => {
+  for (const [business, day] of SCENARIOS) {
+    const s = loadScenario(`betterspace-${business}`, day);
+    const m = computeMetrics(s.records, s.reportingDate, { historyStart: s.historyStart });
+    // Independent calculation straight from the records: non-cancelled services dated in the period.
+    const services = s.records.sales.filter(x => x.offering_type === 'service' && x.status !== 'excluded' && x.date >= m.period.start && x.date <= m.period.end);
+    assert.equal(m.period_service_order_value, services.reduce((a, x) => a + x.amount, 0), `${business} ${day}`);
+    assert.equal(m.period_service_order_count, services.length);
+    assert.ok(m.period_service_order_value <= m.period_order_value);
+  }
+  // A small hand-made case: products, a service, a cancelled service and one outside the period.
+  const sale = (id, date, type, amount, status = 'pending') => ({ id, customer_id: 'C1', date, offering_type: type, amount, status, quantity: 1 });
+  const records = { customers: [], payments: [], stock: [], sales: [
+    sale('S1', '2026-08-03', 'service', 10000), sale('S2', '2026-08-04', 'product', 5000),
+    sale('S3', '2026-08-05', 'service', 7000, 'excluded'), sale('S4', '2026-07-20', 'service', 9000),
+    sale('S5', '2026-08-10', 'service', 2550, 'completed'),
+  ] };
+  const m = computeMetrics(records, '2026-08-30');
+  assert.equal(m.period_service_order_value, 12550);
+  assert.equal(m.period_service_order_count, 2);
+  assert.equal(m.period_order_value, 17550);
+});
